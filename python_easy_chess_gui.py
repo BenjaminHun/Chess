@@ -718,13 +718,12 @@ class EasyChessGui:
         self.is_save_time_left = False
         self.is_save_user_comment = True
 
-    def get_analysis_info_for_move_eval(self, board_fen: str, time_limit: float, move_to_evaluate: str = None) -> dict | None:
+    def get_analysis_info_for_move_eval(self, board_fen: str, depth_limit: int, move_to_evaluate: str = None) -> dict | None:
         """
-        Runs a quick, synchronous Stockfish analysis on a given FEN.
+        Runs a quick, synchronous Stockfish analysis on a given FEN, using depth_limit.
         If move_to_evaluate is provided, it evaluates that specific move.
         Otherwise, it finds the best move.
         """
-        # Ensure an opponent engine is set to use its path
         if not self.opp_path_and_file:
             logging.warning("Opponent engine not set for move analysis.")
             return None
@@ -744,29 +743,30 @@ class EasyChessGui:
             return None
 
         temp_board = chess.Board(board_fen)
-        limit = chess.engine.Limit(time=time_limit) # Állítsa be a keresési időt 0.1 másodpercre
+        
+        # *** MÓDOSÍTÁS: HASZNÁLJUK A MÉLYSÉGET IDŐKORLÁT HELYETT ***
+        # A limit most a depth_limit (ami self.max_depth lesz a híváskor)
+        limit = chess.engine.Limit(depth=depth_limit) 
+        # *************************************************************
 
         try:
             if move_to_evaluate:
                 # Elemzés egy KONKRÉT LÉPÉSRŐL (az UCI protokollt használva)
-                # Két lépést adunk vissza, hogy lássuk a legjobb lépést is, de a pontszámot a kívánt lépésre nézzük.
-                info_list = engine.analyse(temp_board, limit, multipv=2)
+                # Két lépést adunk vissza (multipv=2) a stabilitás növelése érdekében
+                info_list = engine.analyse(temp_board, limit, multipv=2) 
                 
-                # Keressük az elemzésben a megadott lépést
                 target_info = None
                 for info in info_list:
                     if 'pv' in info and info['pv'] and info['pv'][0].uci() == move_to_evaluate:
                         target_info = info
                         break
                 
-                # Ha a kívánt lépés nem a top 2-ben van, futtatunk egy gyors elemzést csak a lépésre
+                # Ha a kívánt lépés nem a top 2-ben van, rákényszerítjük a motort a lépés elemzésére
                 if target_info is None:
-                    # Alternatív elemzés: rákényszerítjük a motort a lépés elemzésére
                     info = engine.analyse(temp_board, limit, root_moves=[chess.Move.from_uci(move_to_evaluate)])
                 else:
                     info = target_info
                     
-                # Ezt a lépést elemeztük, a pontszáma a saját POV-unkban van!
                 score_cp = info['score'].relative.score(mate_score=32000) / 100
                 best_move_uci = move_to_evaluate # Ezt a lépést vizsgáltuk
                 
@@ -2205,13 +2205,15 @@ class EasyChessGui:
                                 # 1. Elemzés a felhasználó lépése ELŐTT: a LEGJOBB LÉPÉS meghatározása (Referencia érték)
                                 # Visszalépés a referenciaálláshoz
                                 board.pop()
-                                ref_analysis = self.get_analysis_info_for_move_eval(board.fen(), 0.1) 
+                                
+                                # 1. Elemzés a felhasználó lépése ELŐTT: a LEGJOBB LÉPÉS meghatározása (Referencia érték)
+                                # *** MÓDOSÍTÁS: ÁTADJUK self.max_depth-et a 0.1 helyett! ***
+                                ref_analysis = self.get_analysis_info_for_move_eval(board.fen(), self.max_depth) 
                                 
                                 # 2. Elemzés a felhasználó lépése ELŐTT: a SAJÁT LÉPÉS értékének meghatározása
-                                # A saját lépést átadjuk értékelésre (UCI formátumban)
+                                # *** MÓDOSÍTÁS: ÁTADJUK self.max_depth-et a 0.1 helyett! ***
                                 user_move_uci = user_move.uci()
-                                user_analysis_at_ref = self.get_analysis_info_for_move_eval(board.fen(), 0.1, move_to_evaluate=user_move_uci)
-
+                                user_analysis_at_ref = self.get_analysis_info_for_move_eval(board.fen(), self.max_depth, move_to_evaluate=user_move_uci)
                                 # Visszalépés a felhasználó lépéséhez
                                 board.push(user_move)
                                 
