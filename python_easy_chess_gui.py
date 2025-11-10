@@ -88,7 +88,7 @@ GUI_THEME = [
     'BrightColors', 'NeutralBlue', 'Kayak', 'SandyBeach', 'TealMono', 'Topanga', 'Dark', 'Black', 'DarkAmber'
 ]
 
-IMAGE_PATH = 'Images/60'  # path to the chess pieces
+IMAGE_PATH = 'Images/100'  # path to the chess pieces
 
 
 BLANK = 0  # piece names
