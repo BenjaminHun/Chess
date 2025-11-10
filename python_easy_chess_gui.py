@@ -1289,6 +1289,17 @@ class EasyChessGui:
                 msg_line = '{}\n'.format(info_all)
                 window.find_element('search_info_all_k').Update(
                         '' if is_hide else msg_line)
+                # *** ÚJ MÓDOSÍTÁS: FOLYAMATOS ÁLLÁS FRISSÍTÉSE (Opponent) ***
+                try:
+                    # Az 'info_all' üzenet első része a pontszám: "+0.60 | 25 | 1.2s | e4 e5..."
+                    score_str = info_all.split('|')[0].strip()
+                    
+                    # Formázás a kérésnek megfelelően
+                    formatted_score = f"Állás: {score_str}"
+                    window.find_element('eval_score_k').Update(formatted_score)
+                except Exception:
+                    logging.exception("Failed to update continuous evaluation score.")
+                # ************************************************************
         else:
             # Best move can be None because engine dies
             try:
@@ -1855,6 +1866,22 @@ class EasyChessGui:
                                     window.Element('advise_info_k').Update(msg_line)
                             except Exception:
                                 continue
+
+                            if 'adv_pv' in msg:
+                                # Az 'adv_pv' üzenet formátuma: "+0.60 | e4 e5 Nf3 Nc6 adv_pv"
+                                parts = msg.split('|')
+                                score = parts[0].strip()
+                                pv_line = ' '.join(parts[1].split()[0:-1]).strip()
+                                
+                                # Az Adviser infó is frissül (meglévő kód)
+                                msg_line = f"{score} | {pv_line} - {self.adviser_id_name}"
+                                window.Element('advise_info_k').Update(msg_line)
+                                
+                                # *** ÚJ MÓDOSÍTÁS: FOLYAMATOS ÁLLÁS FRISSÍTÉSE (Adviser) ***
+                                # Frissítjük a különálló értékelés mezőt is
+                                formatted_score = f"Állás: {score}"
+                                window.find_element('eval_score_k').Update(formatted_score)
+                                # ************************************************************
 
                             if 'bestmove' in msg:
                                 # bestmove can be None so we do try/except
@@ -2523,8 +2550,13 @@ class EasyChessGui:
                         'Right',
                         ['Start::right_adviser_k', 'Stop::right_adviser_k']
                     ]),
+
              sg.Text('', font=('Consolas', 10), key='advise_info_k', relief='sunken',
                      size=(46, 1))],
+                        # *** ÚJ MEZŐ A FOLYAMATOS ÁLLÁS MUTATÁSÁRA ***
+            [sg.Text('Állás: +/-0.0', size=(55, 1), font=('Consolas', 10), 
+                     key='eval_score_k', relief='sunken')],
+            # **********************************************
 
             [sg.Text('Move list', size=(16, 1), font=('Consolas', 10))],
             [sg.Multiline('', do_not_clear=True, autoscroll=True, size=(52, 8),
