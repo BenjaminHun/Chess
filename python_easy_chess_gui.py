@@ -718,6 +718,48 @@ class EasyChessGui:
         self.is_save_time_left = False
         self.is_save_user_comment = True
 
+    def get_analysis_info_for_move_eval(self, board_fen: str, time_limit: float) -> dict | None:
+        """
+        Runs a quick, synchronous Stockfish analysis on a given FEN.
+        Returns the best move (UCI format) and its score (cp).
+        """
+        # Ensure an opponent engine is set to use its path
+        if not self.opp_path_and_file:
+            logging.warning("Opponent engine not set for move analysis.")
+            return None
+            
+        folder = Path(self.opp_path_and_file).parents[0]
+
+        try:
+            if sys_os == 'Windows':
+                engine = chess.engine.SimpleEngine.popen_uci(
+                    self.opp_path_and_file, cwd=folder,
+                    creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                engine = chess.engine.SimpleEngine.popen_uci(
+                    self.opp_path_and_file, cwd=folder)
+        except Exception:
+            logging.exception("Failed to start engine for move analysis.")
+            return None
+
+        temp_board = chess.Board(board_fen)
+        limit = chess.engine.Limit(time=time_limit) # Állítsa be a keresési időt 0.1 másodpercre
+
+        try:
+            info = engine.analyse(temp_board, limit)
+            
+            best_move_uci = info['pv'][0].uci()
+            # Pontszám normalizálása centipawns-ra
+            score_cp = info['score'].relative.score(mate_score=32000) / 100 
+            
+            engine.quit()
+            return {'best_move_uci': best_move_uci, 'score': score_cp, 'board': temp_board}
+            
+        except Exception:
+            logging.exception("Analysis failed in get_analysis_info_for_move_eval.")
+            engine.quit()
+            return None
+
     def update_game(self, mc: int, user_move: str, time_left: int, user_comment: str):
         """Saves moves in the game.
 
@@ -1351,6 +1393,8 @@ class EasyChessGui:
         window.find_element('polyglot_book2_k').Update('')
         window.find_element('advise_info_k').Update('')
         window.find_element('comment_k').Update('')
+        window.find_element('_move_analysis_k').Update('')
+        window.find_element('eval_score_k').Update('')
         window.Element('w_base_time_k').Update('')
         window.Element('b_base_time_k').Update('')
         window.Element('w_elapse_k').Update('')
@@ -2131,6 +2175,47 @@ class EasyChessGui:
                                 # Update clock, reset elapse to zero
                                 human_timer.update_base()
 
+                                # *** ÚJ KÓD: LÉPÉS ÉRTÉKELÉSE ÉS MEGJELENÍTÉSE ***
+                                # 1. Elemzés a felhasználó lépése UTÁN (Aktuális állás)
+                                user_analysis = self.get_analysis_info_for_move_eval(board.fen(), 0.1)
+
+                                # 2. Elemzés a felhasználó lépése ELŐTT (Referenciaállás)
+                                # Visszalépés a referenciaálláshoz
+                                board.pop()
+                                ref_analysis = self.get_analysis_info_for_move_eval(board.fen(), 0.1) # Max 0.1 mp keresés
+
+                                # Visszalépés a felhasználó lépéséhez
+                                board.push(user_move)
+                                
+                                # 3. Megjelenítés
+                                analysis_text = ""
+                                if ref_analysis and user_analysis:
+                                    
+                                    # 1. SAN KÓDOLÁS (ITT HOZZUK LÉTRE A NÉVVEL KÜZDŐ VÁLTOZÓKAT)
+                                    ref_board = ref_analysis['board']
+                                    
+                                    # ITT DEFINIÁLJUK A VÁLTOZÓKAT!
+                                    best_move_san = ref_board.san(chess.Move.from_uci(ref_analysis['best_move_uci']))
+                                    user_move_san = ref_board.san(user_move) 
+                                    
+                                    # 2. ÉRTÉKELÉS ÁTFORDÍTÁSA SAJÁT SZEMSZÖGBE (POV)
+                                    ref_score_user_pov = ref_analysis['score'] 
+                                    user_score_user_pov = -user_analysis['score']
+                                    
+                                    # 3. Pontszámok formázása
+                                    user_score_str = '{:+.2f}'.format(user_score_user_pov)
+                                    best_score_str = '{:+.2f}'.format(ref_score_user_pov)
+                                    
+                                    # 4. SZÖVEG ÖSSZEÁLLÍTÁSA (ITT HASZNÁLJUK A VÁLTOZÓKAT)
+                                    text_line_1 = f"Saját lépés: {user_move_san} {user_score_str}"
+                                    text_line_2 = f"Legjobb lépés: {best_move_san} {best_score_str}"
+                                    analysis_text = f"{text_line_1}\n{text_line_2}"
+                                
+                                # Tisztítás és frissítés
+                                window.find_element('_move_analysis_k').Update('')
+                                window.find_element('_move_analysis_k').Update(analysis_text)
+                                    # *** VÉGE ÚJ KÓD: LÉPÉS ÉRTÉKELÉSE ***
+
                                 # Update game, move from human
                                 time_left = human_timer.base
                                 user_comment = value['comment_k']
@@ -2557,6 +2642,11 @@ class EasyChessGui:
             [sg.Text('Állás: +/-0.0', size=(55, 1), font=('Consolas', 10), 
                      key='eval_score_k', relief='sunken')],
             # **********************************************
+            # *** MÓDOSÍTOTT MEZŐ A LÉPÉS ÉRTÉKELÉSÉHEZ (sg.Multiline) ***
+            [sg.Multiline('', size=(55, 2), font=('Consolas', 10), key='_move_analysis_k',
+                      disabled=True, autoscroll=False, 
+                     background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])], 
+            # **************************************
 
             [sg.Text('Move list', size=(16, 1), font=('Consolas', 10))],
             [sg.Multiline('', do_not_clear=True, autoscroll=True, size=(52, 8),
