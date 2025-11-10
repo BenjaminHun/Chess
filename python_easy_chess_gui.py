@@ -718,10 +718,11 @@ class EasyChessGui:
         self.is_save_time_left = False
         self.is_save_user_comment = True
 
-    def get_analysis_info_for_move_eval(self, board_fen: str, time_limit: float) -> dict | None:
+    def get_analysis_info_for_move_eval(self, board_fen: str, time_limit: float, move_to_evaluate: str = None) -> dict | None:
         """
         Runs a quick, synchronous Stockfish analysis on a given FEN.
-        Returns the best move (UCI format) and its score (cp).
+        If move_to_evaluate is provided, it evaluates that specific move.
+        Otherwise, it finds the best move.
         """
         # Ensure an opponent engine is set to use its path
         if not self.opp_path_and_file:
@@ -746,18 +747,42 @@ class EasyChessGui:
         limit = chess.engine.Limit(time=time_limit) # Állítsa be a keresési időt 0.1 másodpercre
 
         try:
-            info = engine.analyse(temp_board, limit)
-            
-            best_move_uci = info['pv'][0].uci()
-            # Pontszám normalizálása centipawns-ra
-            score_cp = info['score'].relative.score(mate_score=32000) / 100 
+            if move_to_evaluate:
+                # Elemzés egy KONKRÉT LÉPÉSRŐL (az UCI protokollt használva)
+                # Két lépést adunk vissza, hogy lássuk a legjobb lépést is, de a pontszámot a kívánt lépésre nézzük.
+                info_list = engine.analyse(temp_board, limit, multipv=2)
+                
+                # Keressük az elemzésben a megadott lépést
+                target_info = None
+                for info in info_list:
+                    if 'pv' in info and info['pv'] and info['pv'][0].uci() == move_to_evaluate:
+                        target_info = info
+                        break
+                
+                # Ha a kívánt lépés nem a top 2-ben van, futtatunk egy gyors elemzést csak a lépésre
+                if target_info is None:
+                    # Alternatív elemzés: rákényszerítjük a motort a lépés elemzésére
+                    info = engine.analyse(temp_board, limit, root_moves=[chess.Move.from_uci(move_to_evaluate)])
+                else:
+                    info = target_info
+                    
+                # Ezt a lépést elemeztük, a pontszáma a saját POV-unkban van!
+                score_cp = info['score'].relative.score(mate_score=32000) / 100
+                best_move_uci = move_to_evaluate # Ezt a lépést vizsgáltuk
+                
+            else:
+                # Elemzés a LEGJOBB LÉPÉSRŐL (meglévő funkcionalitás)
+                info = engine.analyse(temp_board, limit)
+                best_move_uci = info['pv'][0].uci()
+                score_cp = info['score'].relative.score(mate_score=32000) / 100 
             
             engine.quit()
             return {'best_move_uci': best_move_uci, 'score': score_cp, 'board': temp_board}
             
         except Exception:
             logging.exception("Analysis failed in get_analysis_info_for_move_eval.")
-            engine.quit()
+            try: engine.quit()
+            except: pass
             return None
 
     def update_game(self, mc: int, user_move: str, time_left: int, user_comment: str):
@@ -2176,45 +2201,44 @@ class EasyChessGui:
                                 human_timer.update_base()
 
                                 # *** ÚJ KÓD: LÉPÉS ÉRTÉKELÉSE ÉS MEGJELENÍTÉSE ***
-                                # 1. Elemzés a felhasználó lépése UTÁN (Aktuális állás)
-                                user_analysis = self.get_analysis_info_for_move_eval(board.fen(), 0.1)
-
-                                # 2. Elemzés a felhasználó lépése ELŐTT (Referenciaállás)
+                                
+                                # 1. Elemzés a felhasználó lépése ELŐTT: a LEGJOBB LÉPÉS meghatározása (Referencia érték)
                                 # Visszalépés a referenciaálláshoz
                                 board.pop()
-                                ref_analysis = self.get_analysis_info_for_move_eval(board.fen(), 0.1) # Max 0.1 mp keresés
+                                ref_analysis = self.get_analysis_info_for_move_eval(board.fen(), 0.1) 
+                                
+                                # 2. Elemzés a felhasználó lépése ELŐTT: a SAJÁT LÉPÉS értékének meghatározása
+                                # A saját lépést átadjuk értékelésre (UCI formátumban)
+                                user_move_uci = user_move.uci()
+                                user_analysis_at_ref = self.get_analysis_info_for_move_eval(board.fen(), 0.1, move_to_evaluate=user_move_uci)
 
                                 # Visszalépés a felhasználó lépéséhez
                                 board.push(user_move)
                                 
                                 # 3. Megjelenítés
                                 analysis_text = ""
-                                if ref_analysis and user_analysis:
+                                if ref_analysis and user_analysis_at_ref:
                                     
-                                    # 1. SAN KÓDOLÁS (ITT HOZZUK LÉTRE A NÉVVEL KÜZDŐ VÁLTOZÓKAT)
+                                    # SAN konverzió a REFERENCIA táblán
                                     ref_board = ref_analysis['board']
+                                    best_move_uci = ref_analysis['best_move_uci']
                                     
-                                    # ITT DEFINIÁLJUK A VÁLTOZÓKAT!
-                                    best_move_san = ref_board.san(chess.Move.from_uci(ref_analysis['best_move_uci']))
-                                    user_move_san = ref_board.san(user_move) 
+                                    best_move_san = ref_board.san(chess.Move.from_uci(best_move_uci))
+                                    user_move_san = ref_board.san(user_move)
                                     
-                                    # 2. ÉRTÉKELÉS ÁTFORDÍTÁSA SAJÁT SZEMSZÖGBE (POV)
-                                    ref_score_user_pov = ref_analysis['score'] 
-                                    user_score_user_pov = -user_analysis['score']
-                                    
-                                    # 3. Pontszámok formázása
-                                    user_score_str = '{:+.2f}'.format(user_score_user_pov)
-                                    best_score_str = '{:+.2f}'.format(ref_score_user_pov)
-                                    
-                                    # 4. SZÖVEG ÖSSZEÁLLÍTÁSA (ITT HASZNÁLJUK A VÁLTOZÓKAT)
+                                    # PONTOS ÉRTÉKELÉSEK (már nem kell PovScore konverzió)
+                                    # Mindkét pontszám a VILÁGOS (Ön) szemszögéből van megadva!
+                                    user_score_str = '{:+.2f}'.format(user_analysis_at_ref['score'])
+                                    best_score_str = '{:+.2f}'.format(ref_analysis['score'])
+
+                                    # A kért formátum összeállítása
                                     text_line_1 = f"Saját lépés: {user_move_san} {user_score_str}"
                                     text_line_2 = f"Legjobb lépés: {best_move_san} {best_score_str}"
                                     analysis_text = f"{text_line_1}\n{text_line_2}"
                                 
-                                # Tisztítás és frissítés
                                 window.find_element('_move_analysis_k').Update('')
                                 window.find_element('_move_analysis_k').Update(analysis_text)
-                                    # *** VÉGE ÚJ KÓD: LÉPÉS ÉRTÉKELÉSE ***
+                                # *** VÉGE ÚJ KÓD: LÉPÉS ÉRTÉKELÉSE ***
 
                                 # Update game, move from human
                                 time_left = human_timer.base
