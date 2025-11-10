@@ -705,8 +705,9 @@ class EasyChessGui:
         self.engine_tc_type = 'fischer'
 
         # Default board color is brown
-        self.sq_light_color = '#F0D9B5'
-        self.sq_dark_color = '#B58863'
+        # Default board color is brown
+        self.sq_light_color = '#EBECD0'
+        self.sq_dark_color = '#739552'
 
         # Move highlight, for brown board
         self.move_sq_light_color = '#E8E18E'
