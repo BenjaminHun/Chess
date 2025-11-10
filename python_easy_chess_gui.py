@@ -81,7 +81,7 @@ ico_path = {
 
 
 MIN_DEPTH = 1
-MAX_DEPTH = 1000
+MAX_DEPTH = 4
 MANAGED_UCI_OPTIONS = ['ponder', 'uci_chess960', 'multipv', 'uci_analysemode', 'ownbook']
 GUI_THEME = [
     'Green', 'GreenTan', 'LightGreen', 'BluePurple', 'Purple', 'BlueMono', 'GreenMono', 'BrownBlue',
