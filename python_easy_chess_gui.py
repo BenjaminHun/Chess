@@ -718,14 +718,15 @@ class EasyChessGui:
         self.is_save_time_left = False
         self.is_save_user_comment = True
 
-    def get_analysis_info_for_move_eval(self, board_fen: str, depth_limit: int, move_to_evaluate: str = None) -> dict | None:
+    def run_engine_analysis(self, board_fen: str, depth_limit: int, 
+                            move_to_evaluate: str = None, multipv: int = 1) -> list | dict | None:
         """
-        Runs a quick, synchronous Stockfish analysis on a given FEN, using depth_limit.
-        If move_to_evaluate is provided, it evaluates that specific move.
-        Otherwise, it finds the best move.
+        Runs a quick, synchronous Stockfish analysis.
+        If move_to_evaluate is provided, it evaluates that specific move and returns a dict.
+        If multipv > 1, it returns a list of top moves (Multi-PV analysis, list-et ad vissza).
         """
         if not self.opp_path_and_file:
-            logging.warning("Opponent engine not set for move analysis.")
+            logging.warning("Opponent engine not set for analysis.")
             return None
             
         folder = Path(self.opp_path_and_file).parents[0]
@@ -739,48 +740,44 @@ class EasyChessGui:
                 engine = chess.engine.SimpleEngine.popen_uci(
                     self.opp_path_and_file, cwd=folder)
         except Exception:
-            logging.exception("Failed to start engine for move analysis.")
+            logging.exception("Failed to start engine for analysis.")
             return None
 
         temp_board = chess.Board(board_fen)
-        
-        # *** MÓDOSÍTÁS: HASZNÁLJUK A MÉLYSÉGET IDŐKORLÁT HELYETT ***
-        # A limit most a depth_limit (ami self.max_depth lesz a híváskor)
+        # Fix depth limit használata a stabilitás érdekében
         limit = chess.engine.Limit(depth=depth_limit) 
-        # *************************************************************
 
         try:
             if move_to_evaluate:
-                # Elemzés egy KONKRÉT LÉPÉSRŐL (az UCI protokollt használva)
-                # Két lépést adunk vissza (multipv=2) a stabilitás növelése érdekében
-                info_list = engine.analyse(temp_board, limit, multipv=2) 
+                # Elemzés egy KONKRÉT LÉPÉSRŐL (Single move evaluation)
+                # Kényszerítjük a motort a lépés elemzésére
+                info = engine.analyse(temp_board, limit, root_moves=[chess.Move.from_uci(move_to_evaluate)])
                 
-                target_info = None
-                for info in info_list:
-                    if 'pv' in info and info['pv'] and info['pv'][0].uci() == move_to_evaluate:
-                        target_info = info
-                        break
-                
-                # Ha a kívánt lépés nem a top 2-ben van, rákényszerítjük a motort a lépés elemzésére
-                if target_info is None:
-                    info = engine.analyse(temp_board, limit, root_moves=[chess.Move.from_uci(move_to_evaluate)])
-                else:
-                    info = target_info
-                    
                 score_cp = info['score'].relative.score(mate_score=32000) / 100
-                best_move_uci = move_to_evaluate # Ezt a lépést vizsgáltuk
+                best_move_uci = move_to_evaluate 
                 
+                engine.quit()
+                return {'best_move_uci': best_move_uci, 'score': score_cp, 'board': temp_board}
+            
             else:
-                # Elemzés a LEGJOBB LÉPÉSRŐL (meglévő funkcionalitás)
-                info = engine.analyse(temp_board, limit)
-                best_move_uci = info['pv'][0].uci()
-                score_cp = info['score'].relative.score(mate_score=32000) / 100 
-            
-            engine.quit()
-            return {'best_move_uci': best_move_uci, 'score': score_cp, 'board': temp_board}
-            
+                # Elemzés a TOP N LÉPÉSRŐL (Multi-PV analysis)
+                infos = engine.analyse(temp_board, limit, multipv=multipv)
+                
+                analysis_results = []
+                for info in infos:
+                    score_cp = info['score'].relative.score(mate_score=32000) / 100
+                    best_move_uci = info['pv'][0].uci()
+                    analysis_results.append({
+                        'best_move_uci': best_move_uci, 
+                        'score': score_cp, 
+                        'board': temp_board
+                    })
+                
+                engine.quit()
+                return analysis_results
+
         except Exception:
-            logging.exception("Analysis failed in get_analysis_info_for_move_eval.")
+            logging.exception("Analysis failed in run_engine_analysis.")
             try: engine.quit()
             except: pass
             return None
@@ -1420,6 +1417,7 @@ class EasyChessGui:
         window.find_element('comment_k').Update('')
         window.find_element('_move_analysis_k').Update('')
         window.find_element('eval_score_k').Update('')
+        window.find_element('_top_moves_analysis_k').Update('') # *** ÚJ MEZŐ TÖRLÉSE ***
         window.Element('w_base_time_k').Update('')
         window.Element('b_base_time_k').Update('')
         window.Element('w_elapse_k').Update('')
@@ -2200,47 +2198,72 @@ class EasyChessGui:
                                 # Update clock, reset elapse to zero
                                 human_timer.update_base()
 
-                                # *** ÚJ KÓD: LÉPÉS ÉRTÉKELÉSE ÉS MEGJELENÍTÉSE ***
-                                
-                                # 1. Elemzés a felhasználó lépése ELŐTT: a LEGJOBB LÉPÉS meghatározása (Referencia érték)
                                 # Visszalépés a referenciaálláshoz
                                 board.pop()
                                 
-                                # 1. Elemzés a felhasználó lépése ELŐTT: a LEGJOBB LÉPÉS meghatározása (Referencia érték)
-                                # *** MÓDOSÍTÁS: ÁTADJUK self.max_depth-et a 0.1 helyett! ***
-                                ref_analysis = self.get_analysis_info_for_move_eval(board.fen(), self.max_depth) 
-                                
+                                # 1. Multi-PV elemzés a Top N lépéshez (ezt fogjuk használni a referenciaértékhez és a listához is)
+                                MAX_TOP_MOVES = 6
+                                # MÓDOSÍTOTT HÍVÁS: run_engine_analysis
+                                top_moves_analysis = self.run_engine_analysis(board.fen(), self.max_depth, multipv=MAX_TOP_MOVES) 
+
                                 # 2. Elemzés a felhasználó lépése ELŐTT: a SAJÁT LÉPÉS értékének meghatározása
-                                # *** MÓDOSÍTÁS: ÁTADJUK self.max_depth-et a 0.1 helyett! ***
                                 user_move_uci = user_move.uci()
-                                user_analysis_at_ref = self.get_analysis_info_for_move_eval(board.fen(), self.max_depth, move_to_evaluate=user_move_uci)
-                                # Visszalépés a felhasználó lépéséhez
-                                board.push(user_move)
+                                # MÓDOSÍTOTT HÍVÁS: run_engine_analysis
+                                user_analysis_at_ref = self.run_engine_analysis(board.fen(), self.max_depth, move_to_evaluate=user_move_uci)
+
+                                board.push(user_move) # Visszalépés a felhasználó lépéséhez
                                 
-                                # 3. Megjelenítés
+                                # 3. Kijelzés: Saját és Legjobb Lépés Összehasonlítás
                                 analysis_text = ""
-                                if ref_analysis and user_analysis_at_ref:
+                                if top_moves_analysis and user_analysis_at_ref and isinstance(top_moves_analysis, list):
                                     
-                                    # SAN konverzió a REFERENCIA táblán
+                                    # A PV1 lesz a referencia (top_moves_analysis[0])
+                                    ref_analysis = top_moves_analysis[0]
+                                    ref_score_user_pov = ref_analysis['score']
+                                    user_score_user_pov = user_analysis_at_ref['score']
+                                    
                                     ref_board = ref_analysis['board']
                                     best_move_uci = ref_analysis['best_move_uci']
                                     
                                     best_move_san = ref_board.san(chess.Move.from_uci(best_move_uci))
                                     user_move_san = ref_board.san(user_move)
                                     
-                                    # PONTOS ÉRTÉKELÉSEK (már nem kell PovScore konverzió)
-                                    # Mindkét pontszám a VILÁGOS (Ön) szemszögéből van megadva!
-                                    user_score_str = '{:+.2f}'.format(user_analysis_at_ref['score'])
-                                    best_score_str = '{:+.2f}'.format(ref_analysis['score'])
+                                    # Pontszámok formázása
+                                    user_score_str = '{:+.2f}'.format(user_score_user_pov)
+                                    best_score_str = '{:+.2f}'.format(ref_score_user_pov)
 
-                                    # A kért formátum összeállítása
+                                    # Összehasonlító szöveg
                                     text_line_1 = f"Saját lépés: {user_move_san} {user_score_str}"
                                     text_line_2 = f"Legjobb lépés: {best_move_san} {best_score_str}"
                                     analysis_text = f"{text_line_1}\n{text_line_2}"
                                 
                                 window.find_element('_move_analysis_k').Update('')
                                 window.find_element('_move_analysis_k').Update(analysis_text)
-                                # *** VÉGE ÚJ KÓD: LÉPÉS ÉRTÉKELÉSE ***
+
+
+                                # 4. Kijelzés: Top N Lépés és CP Loss
+                                top_moves_text = ""
+                                if top_moves_analysis and isinstance(top_moves_analysis, list):
+                                    # A PV1 pontszámát használjuk CP Loss alapnak (az első elem)
+                                    # Ez a Legjobb Lépés értéke, ami a maximum
+                                    pv1_score = top_moves_analysis[0]['score']
+                                    
+                                    for i, info in enumerate(top_moves_analysis):
+                                        move_uci = info['best_move_uci']
+                                        move_san = ref_board.san(chess.Move.from_uci(move_uci))
+                                        score = info['score']
+                                        
+                                        # CP Loss számítás: (Optimális Pontszám - Vizsgált Pontszám) * 100
+                                        # A 'score' és 'pv1_score' centipawnban van
+                                        cp_loss = (pv1_score - score)
+                                        
+                                        # Biztosítjuk, hogy a veszteség ne legyen negatív (ne legyen nyereség a Top 1-hez képest)
+                                        # Ezzel kiküszöböljük a lebegőpontos aritmetika miatti minimális eltéréseket
+                                        cp_loss_str = '{:.2f}'.format(max(0.00, cp_loss)) 
+                                        
+                                        top_moves_text += f"Top {i+1}: {move_san} (CP Loss: {cp_loss_str})\n"
+                                        
+                                window.find_element('_top_moves_analysis_k').Update(top_moves_text)
 
                                 # Update game, move from human
                                 time_left = human_timer.base
@@ -2673,6 +2696,12 @@ class EasyChessGui:
                       disabled=True, autoscroll=False, 
                      background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])], 
             # **************************************
+            # *** ÚJ MEZŐ: TOP N LÉPÉSEK CENTIPAWN LOSS-SZAL ***
+            [sg.Text('Top Moves (CP Loss)', size=(55, 1), font=('Consolas', 10), relief='sunken')],
+            [sg.Multiline('', size=(55, 6), font=('Consolas', 10), key='_top_moves_analysis_k',
+                     disabled=True, autoscroll=False, 
+                     background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])], 
+            # *************************************************
 
             [sg.Text('Move list', size=(16, 1), font=('Consolas', 10))],
             [sg.Multiline('', do_not_clear=True, autoscroll=True, size=(52, 8),
