@@ -128,6 +128,8 @@ initial_board = [[ROOKB, KNIGHTB, BISHOPB, QUEENB, KINGB, BISHOPB, KNIGHTB, ROOK
                  [ROOKW, KNIGHTW, BISHOPW, QUEENW, KINGW, BISHOPW, KNIGHTW, ROOKW]]
 
 
+
+
 white_init_promote_board = [[QUEENW, ROOKW, BISHOPW, KNIGHTW]]
 
 black_init_promote_board = [[QUEENB, ROOKB, BISHOPB, KNIGHTB]]
@@ -2172,6 +2174,36 @@ class EasyChessGui:
                             # Check if user move is legal
                             if user_move in list(board.legal_moves):
                                 # Update rook location if this is a castle move
+
+                                # Visszalépés a referenciaálláshoz
+                                # board.pop() was here, but we need it before analysis
+                                
+                                # 1. Multi-PV elemzés a Top N lépéshez (ezt fogjuk használni a referenciaértékhez és a listához is)
+                                MAX_TOP_MOVES = 6
+                                # MÓDOSÍTOTT HÍVÁS: run_engine_analysis
+                                top_moves_analysis = self.run_engine_analysis(board.fen(), self.max_depth, multipv=MAX_TOP_MOVES) 
+
+                                # 2. A felhasználó lépésének megkeresése a top lépések között
+                                user_move_uci = user_move.uci()
+                                user_analysis_at_ref = None
+                                if top_moves_analysis and isinstance(top_moves_analysis, list):
+                                    for analysis in top_moves_analysis:
+                                        if analysis['best_move_uci'] == user_move_uci:
+                                            user_analysis_at_ref = analysis
+                                            break
+                                
+                                # Ha a felhasználó lépése nem volt a top N-ben, akkor futtatunk rá egy külön elemzést.
+                                # Ez biztosítja, hogy a nagyon rossz lépéseknek is legyen értéke.
+                                if user_analysis_at_ref is None:
+                                    user_analysis_at_ref = self.run_engine_analysis(
+                                        board.fen(), self.max_depth, move_to_evaluate=user_move_uci
+                                    )
+
+                                # board.push(user_move) # Visszalépés a felhasználó lépéséhez
+                                # This is now done after the bad move check.
+
+                                is_bad_move = False
+
                                 if board.is_castling(user_move):
                                     self.update_rook(window, str(user_move))
 
@@ -2179,40 +2211,6 @@ class EasyChessGui:
                                 elif board.is_en_passant(user_move):
                                     self.update_ep(window, user_move, board.turn)
 
-                                # Empty the board from_square, applied to any types of move
-                                self.psg_board[move_from[0]][move_from[1]] = BLANK
-
-                                # Update board to_square if move is a promotion
-                                if is_promote:
-                                    self.psg_board[to_row][to_col] = psg_promo
-                                # Update the to_square if not a promote move
-                                else:
-                                    # Place piece in the move to_square
-                                    self.psg_board[to_row][to_col] = piece
-
-                                self.redraw_board(window)
-
-                                board.push(user_move)
-                                move_cnt += 1
-
-                                # Update clock, reset elapse to zero
-                                human_timer.update_base()
-
-                                # Visszalépés a referenciaálláshoz
-                                board.pop()
-                                
-                                # 1. Multi-PV elemzés a Top N lépéshez (ezt fogjuk használni a referenciaértékhez és a listához is)
-                                MAX_TOP_MOVES = 6
-                                # MÓDOSÍTOTT HÍVÁS: run_engine_analysis
-                                top_moves_analysis = self.run_engine_analysis(board.fen(), self.max_depth, multipv=MAX_TOP_MOVES) 
-
-                                # 2. Elemzés a felhasználó lépése ELŐTT: a SAJÁT LÉPÉS értékének meghatározása
-                                user_move_uci = user_move.uci()
-                                # MÓDOSÍTOTT HÍVÁS: run_engine_analysis
-                                user_analysis_at_ref = self.run_engine_analysis(board.fen(), self.max_depth, move_to_evaluate=user_move_uci)
-
-                                board.push(user_move) # Visszalépés a felhasználó lépéséhez
-                                
                                 # 3. Kijelzés: Saját és Legjobb Lépés Összehasonlítás
                                 analysis_text = ""
                                 if top_moves_analysis and user_analysis_at_ref and isinstance(top_moves_analysis, list):
@@ -2236,6 +2234,36 @@ class EasyChessGui:
                                     text_line_1 = f"Saját lépés: {user_move_san} {user_score_str}"
                                     text_line_2 = f"Legjobb lépés: {best_move_san} {best_score_str}"
                                     analysis_text = f"{text_line_1}\n{text_line_2}"
+
+                                    # Check for bad move (CP loss > 50)
+                                    cp_loss = (ref_score_user_pov - user_score_user_pov)
+                                    if cp_loss > 0.5:
+                                        is_bad_move = True
+                                        sg.Popup('Rossz lépés! A lépésed több mint 50CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
+                                        
+                                        # Restore board color
+                                        color = self.sq_dark_color if (fr_row + fr_col) % 2 else self.sq_light_color
+                                        window.find_element(key=(fr_row, fr_col)).Update(button_color=('white', color))
+                                        
+                                        move_state = 0
+                                        continue # Go back to wait for user input
+
+                                if not is_bad_move:
+                                    # Empty the board from_square, applied to any types of move
+                                    self.psg_board[move_from[0]][move_from[1]] = BLANK
+
+                                    # Update board to_square if move is a promotion
+                                    if is_promote:
+                                        self.psg_board[to_row][to_col] = psg_promo
+                                    # Update the to_square if not a promote move
+                                    else:
+                                        # Place piece in the move to_square
+                                        self.psg_board[to_row][to_col] = piece
+
+                                    self.redraw_board(window)
+                                    board.push(user_move)
+                                    move_cnt += 1
+                                    human_timer.update_base() # Update clock, reset elapse to zero
                                 
                                 window.find_element('_move_analysis_k').Update('')
                                 window.find_element('_move_analysis_k').Update(analysis_text)
