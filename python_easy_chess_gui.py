@@ -2211,6 +2211,31 @@ class EasyChessGui:
                                 elif board.is_en_passant(user_move):
                                     self.update_ep(window, user_move, board.turn)
 
+                                # 4. Kijelzés: Top N Lépés és CP Loss (MINDIG, a rossz lépés ellenőrzés előtt)
+                                top_moves_text = ""
+                                if top_moves_analysis and isinstance(top_moves_analysis, list):
+                                    # A PV1 pontszámát használjuk CP Loss alapnak (az első elem)
+                                    # Ez a Legjobb Lépés értéke, ami a maximum
+                                    ref_board_for_san = top_moves_analysis[0]['board']
+                                    pv1_score = top_moves_analysis[0]['score']
+                                    
+                                    for i, info in enumerate(top_moves_analysis):
+                                        move_uci = info['best_move_uci']
+                                        move_san = ref_board_for_san.san(chess.Move.from_uci(move_uci))
+                                        score = info['score']
+                                        
+                                        # CP Loss számítás: (Optimális Pontszám - Vizsgált Pontszám)
+                                        cp_loss_val = (pv1_score - score)
+                                        
+                                        # Biztosítjuk, hogy a veszteség ne legyen negatív
+                                        cp_loss_str = '{:.2f}'.format(max(0.00, cp_loss_val)) 
+                                        
+                                        top_moves_text += f"Top {i+1}: {move_san} (CP Loss: {cp_loss_str})\n"
+                                        
+                                window.find_element('_top_moves_analysis_k').Update('') # Először töröljük
+                                window.find_element('_top_moves_analysis_k').Update(top_moves_text)
+
+
                                 # 3. Kijelzés: Saját és Legjobb Lépés Összehasonlítás
                                 analysis_text = ""
                                 if top_moves_analysis and user_analysis_at_ref and isinstance(top_moves_analysis, list):
@@ -2234,6 +2259,9 @@ class EasyChessGui:
                                     text_line_1 = f"Saját lépés: {user_move_san} {user_score_str}"
                                     text_line_2 = f"Legjobb lépés: {best_move_san} {best_score_str}"
                                     analysis_text = f"{text_line_1}\n{text_line_2}"
+                                    
+                                    window.find_element('_move_analysis_k').Update('') # Először töröljük
+                                    window.find_element('_move_analysis_k').Update(analysis_text)
 
                                     # Check for bad move (CP loss > 50)
                                     cp_loss = (ref_score_user_pov - user_score_user_pov)
@@ -2264,34 +2292,6 @@ class EasyChessGui:
                                     board.push(user_move)
                                     move_cnt += 1
                                     human_timer.update_base() # Update clock, reset elapse to zero
-                                
-                                window.find_element('_move_analysis_k').Update('')
-                                window.find_element('_move_analysis_k').Update(analysis_text)
-
-
-                                # 4. Kijelzés: Top N Lépés és CP Loss
-                                top_moves_text = ""
-                                if top_moves_analysis and isinstance(top_moves_analysis, list):
-                                    # A PV1 pontszámát használjuk CP Loss alapnak (az első elem)
-                                    # Ez a Legjobb Lépés értéke, ami a maximum
-                                    pv1_score = top_moves_analysis[0]['score']
-                                    
-                                    for i, info in enumerate(top_moves_analysis):
-                                        move_uci = info['best_move_uci']
-                                        move_san = ref_board.san(chess.Move.from_uci(move_uci))
-                                        score = info['score']
-                                        
-                                        # CP Loss számítás: (Optimális Pontszám - Vizsgált Pontszám) * 100
-                                        # A 'score' és 'pv1_score' centipawnban van
-                                        cp_loss = (pv1_score - score)
-                                        
-                                        # Biztosítjuk, hogy a veszteség ne legyen negatív (ne legyen nyereség a Top 1-hez képest)
-                                        # Ezzel kiküszöböljük a lebegőpontos aritmetika miatti minimális eltéréseket
-                                        cp_loss_str = '{:.2f}'.format(max(0.00, cp_loss)) 
-                                        
-                                        top_moves_text += f"Top {i+1}: {move_san} (CP Loss: {cp_loss_str})\n"
-                                        
-                                window.find_element('_top_moves_analysis_k').Update(top_moves_text)
 
                                 # Update game, move from human
                                 time_left = human_timer.base
