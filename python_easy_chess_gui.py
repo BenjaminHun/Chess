@@ -2265,7 +2265,7 @@ class EasyChessGui:
 
                                     # Check for bad move (CP loss > 50)
                                     cp_loss = (ref_score_user_pov - user_score_user_pov)
-                                    if cp_loss > 0.5:
+                                    if cp_loss > 0.3:
                                         is_bad_move = True
                                         sg.Popup('Rossz lépés! A lépésed több mint 50CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
                                         
