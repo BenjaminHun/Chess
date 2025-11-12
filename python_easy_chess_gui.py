@@ -2782,29 +2782,29 @@ class EasyChessGui:
                      background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])],
             # *************************************************
 
-            [sg.Text('Move list', size=(16, 1), font=('Consolas', 10))],
+            [sg.Text('Move list', size=(16, 1), font=('Consolas', 10, ), visible = False)],
             [sg.Multiline('', do_not_clear=True, autoscroll=True, size=(52, 8),
-                          font=('Consolas', 10), key='_movelist_', disabled=True)],
+                          font=('Consolas', 10), key='_movelist_', disabled=True, visible = False)],
 
-            [sg.Text('Comment', size=(7, 1), font=('Consolas', 10))],
+            [sg.Text('Comment', size=(7, 1), font=('Consolas', 10), visible = False)],
             [sg.Multiline('', do_not_clear=True, autoscroll=True, size=(52, 3),
-                          font=('Consolas', 10), key='comment_k')],
+                          font=('Consolas', 10), key='comment_k', visible = False), ],
 
             [sg.Text('BOOK 1, Comp games', size=(26, 1),
                      font=('Consolas', 10),
-                     right_click_menu=['Right', ['Show::right_book1_k', 'Hide::right_book1_k']]),
+                     right_click_menu=['Right', ['Show::right_book1_k', 'Hide::right_book1_k']], visible = False),
              sg.Text('BOOK 2, Human games',
                      font=('Consolas', 10),
-                     right_click_menu=['Right', ['Show::right_book2_k', 'Hide::right_book2_k']])],
+                     right_click_menu=['Right', ['Show::right_book2_k', 'Hide::right_book2_k']], visible = False)],
             [sg.Multiline('', do_not_clear=True, autoscroll=False, size=(23, 4),
-                          font=('Consolas', 10), key='polyglot_book1_k', disabled=True),
+                          font=('Consolas', 10), key='polyglot_book1_k', disabled=True, visible = False),
              sg.Multiline('', do_not_clear=True, autoscroll=False, size=(25, 4),
-                          font=('Consolas', 10), key='polyglot_book2_k', disabled=True)],
+                          font=('Consolas', 10), key='polyglot_book2_k', disabled=True, visible = False)],
             [sg.Text('Opponent Search Info', font=('Consolas', 10), size=(30, 1),
                      right_click_menu=['Right',
-                                       ['Show::right_search_info_k', 'Hide::right_search_info_k']])],
+                                       ['Show::right_search_info_k', 'Hide::right_search_info_k']], visible = False)],
             [sg.Text('', key='search_info_all_k', size=(55, 1),
-                     font=('Consolas', 10), relief='sunken')],
+                     font=('Consolas', 10), relief='sunken', visible = False)],
         ]
 
         board_tab = [[sg.Column(board_layout)]]
