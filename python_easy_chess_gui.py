@@ -772,7 +772,8 @@ class EasyChessGui:
                     analysis_results.append({
                         'best_move_uci': best_move_uci, 
                         'score': score_cp, 
-                        'board': temp_board
+                        'board': temp_board,
+                        'pv': info.get('pv') # Add the full PV list
                     })
                 
                 engine.quit()
@@ -1418,6 +1419,7 @@ class EasyChessGui:
         window.find_element('advise_info_k').Update('')
         window.find_element('comment_k').Update('')
         window.find_element('_move_analysis_k').Update('')
+        window.find_element('_consequence_analysis_k').Update('')
         window.find_element('eval_score_k').Update('')
         window.find_element('_top_moves_analysis_k').Update('') # *** ÚJ MEZŐ TÖRLÉSE ***
         window.Element('w_base_time_k').Update('')
@@ -2265,17 +2267,61 @@ class EasyChessGui:
 
                                     # Check for bad move (CP loss > 50)
                                     cp_loss = (ref_score_user_pov - user_score_user_pov)
-                                    if cp_loss > 0.3:
+                                    if cp_loss > 0.3: # Threshold set to 50 CP (0.5)
                                         is_bad_move = True
                                         sg.Popup('Rossz lépés! A lépésed több mint 50CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
                                         
+                                        # Analyze and show consequence of the bad move
+                                        bad_move_board = board.copy()
+                                        bad_move_board.push(user_move)
+                                        
+                                        # Run analysis on the board state AFTER the bad move
+                                        # Use a deeper search for a more meaningful consequence analysis
+                                        consequence_depth = int(self.max_depth * 1.5)
+                                        consequence_analysis_list = self.run_engine_analysis(bad_move_board.fen(), consequence_depth, multipv=1)
+                                        
+                                        if consequence_analysis_list and isinstance(consequence_analysis_list, list):
+                                            consequence_analysis = consequence_analysis_list[0]
+                                            # Get the PV from the engine after the bad move and display it
+                                            pv_moves = consequence_analysis.get('pv') # This is a list of chess.Move objects
+                                            if pv_moves:
+                                                # Start with the board state BEFORE the bad move to include it in the output
+                                                temp_board = board.copy()
+                                                consequence_text = ""
+
+                                                # Prepend the user's bad move to the PV list
+                                                full_variation = [user_move] + pv_moves
+
+                                                # Process in pairs to ensure complete lines
+                                                # Limit to 8 pairs (16 moves)
+                                                for i in range(0, min(len(full_variation), 16), 2):
+                                                    # Ensure there is a full pair to process
+                                                    if i + 1 >= len(full_variation):
+                                                        break
+
+                                                    move1 = full_variation[i]
+                                                    move2 = full_variation[i+1]
+
+                                                    # Add move number and ... for black if needed
+                                                    if temp_board.turn == chess.WHITE:
+                                                        consequence_text += f"{temp_board.fullmove_number}. "
+                                                    elif i == 0: # First move is by Black
+                                                        consequence_text += f"{temp_board.fullmove_number}... "
+
+                                                    consequence_text += f"{temp_board.san(move1)} "
+                                                    temp_board.push(move1)
+                                                    consequence_text += f"{temp_board.san(move2)}\n"
+                                                    temp_board.push(move2)
+                                                
+                                                window.find_element('_consequence_analysis_k').Update('') # Clear first
+                                                window.find_element('_consequence_analysis_k').Update(consequence_text)
+
                                         # Restore board color
                                         color = self.sq_dark_color if (fr_row + fr_col) % 2 else self.sq_light_color
                                         window.find_element(key=(fr_row, fr_col)).Update(button_color=('white', color))
                                         
                                         move_state = 0
                                         continue # Go back to wait for user input
-
                                 if not is_bad_move:
                                     # Empty the board from_square, applied to any types of move
                                     self.psg_board[move_from[0]][move_from[1]] = BLANK
@@ -2729,6 +2775,11 @@ class EasyChessGui:
             [sg.Multiline('', size=(55, 6), font=('Consolas', 10), key='_top_moves_analysis_k',
                      disabled=True, autoscroll=False, 
                      background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])], 
+            # *** ÚJ MEZŐ: ROSSZ LÉPÉS KÖVETKEZMÉNYE ***
+            [sg.Text('Consequence of Bad Move', size=(55, 1), font=('Consolas', 10), relief='sunken')],
+            [sg.Multiline('', size=(55, 4), font=('Consolas', 10), key='_consequence_analysis_k',
+                     disabled=True, autoscroll=False,
+                     background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])],
             # *************************************************
 
             [sg.Text('Move list', size=(16, 1), font=('Consolas', 10))],
