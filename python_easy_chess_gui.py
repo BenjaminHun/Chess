@@ -720,6 +720,58 @@ class EasyChessGui:
         self.is_save_time_left = False
         self.is_save_user_comment = True
 
+        # Visualization state for bad move consequence
+        self.is_visualizing_consequence = False
+        self.saved_game_fen_before_visualization = None
+        self.last_consequence_variation = []
+        self.visualization_index = -1
+        self.visualization_board = None
+
+    def fen_to_psg_board(self, window, fen_string):
+        """ Update psg_board based on FEN """
+        # First, reset all square colors to default before redrawing
+        for i in range(8):
+            for j in range(8):
+                color = self.sq_dark_color if (i + j) % 2 else self.sq_light_color
+                elem = window.find_element(key=(i, j))
+                elem.Update(button_color=('white', color))
+
+        psgboard = []
+        pc_locations = fen_string.split()[0]
+        board = chess.BaseBoard(pc_locations)
+        old_r = None
+
+        for s in chess.SQUARES:
+            r = chess.square_rank(s)
+            if old_r is None:
+                piece_r = []
+            elif old_r != r:
+                psgboard.append(piece_r)
+                piece_r = []
+            elif s == 63:
+                psgboard.append(piece_r)
+
+            pc = board.piece_at(s ^ 56)
+            if pc is not None:
+                pt = pc.piece_type
+                c = pc.color
+                piece_map = {
+                    (chess.WHITE, chess.PAWN): PAWNW, (chess.WHITE, chess.KNIGHT): KNIGHTW,
+                    (chess.WHITE, chess.BISHOP): BISHOPW, (chess.WHITE, chess.ROOK): ROOKW,
+                    (chess.WHITE, chess.QUEEN): QUEENW, (chess.WHITE, chess.KING): KINGW,
+                    (chess.BLACK, chess.PAWN): PAWNB, (chess.BLACK, chess.KNIGHT): KNIGHTB,
+                    (chess.BLACK, chess.BISHOP): BISHOPB, (chess.BLACK, chess.ROOK): ROOKB,
+                    (chess.BLACK, chess.QUEEN): QUEENB, (chess.BLACK, chess.KING): KINGB,
+                }
+                piece_r.append(piece_map.get((c, pt), BLANK))
+            else:
+                piece_r.append(BLANK)
+            old_r = r
+
+        self.psg_board = psgboard
+        self.redraw_board(window)
+        return psgboard
+
     def run_engine_analysis(self, board_fen: str, depth_limit: int, 
                             move_to_evaluate: str = None, multipv: int = 1) -> list | dict | None:
         """
@@ -1423,6 +1475,12 @@ class EasyChessGui:
         window.find_element('eval_score_k').Update('')
         window.find_element('_top_moves_analysis_k').Update('') # *** ÚJ MEZŐ TÖRLÉSE ***
         window.Element('w_base_time_k').Update('')
+        # Hide and disable visualization controls on clear
+        window.find_element('_visualize_consequence_cb_').Update(visible=False, value=False)
+        window.find_element('_vis_start_').Update(visible=False)
+        window.find_element('_vis_prev_').Update(visible=False)
+        window.find_element('_vis_next_').Update(visible=False)
+        window.find_element('_vis_end_').Update(visible=False)
         window.Element('b_base_time_k').Update('')
         window.Element('w_elapse_k').Update('')
         window.Element('b_elapse_k').Update('')
@@ -1449,11 +1507,11 @@ class EasyChessGui:
         if self.fen.endswith(' '):
             self.fen = self.fen[:-1]
 
-    def fen_to_psg_board(self, window):
+    def fen_to_psg_board_from_self(self, window):
         """ Update psg_board based on FEN """
         psgboard = []
 
-        # Get piece locations only to build psg board
+        # Get piece locations only to build psg board from self.fen
         pc_locations = self.fen.split()[0]
 
         board = chess.BaseBoard(pc_locations)
@@ -1514,6 +1572,7 @@ class EasyChessGui:
 
         self.psg_board = psgboard
         self.redraw_board(window)
+        return psgboard
 
     def change_square_color(self, window, row, col):
         """
@@ -1780,6 +1839,17 @@ class EasyChessGui:
         is_search_stop_for_user_draws = False
         is_hide_book1 = True
         is_hide_book2 = True
+        # Reset visualization state at the start of a new game
+        self.is_visualizing_consequence = False
+        self.saved_game_fen_before_visualization = None
+        self.last_consequence_variation = []
+        self.visualization_index = -1
+        self.visualization_board = None
+        window.find_element('_visualize_consequence_cb_').Update(visible=False, value=False)
+        window.find_element('_vis_start_').Update(visible=False)
+        window.find_element('_vis_prev_').Update(visible=False)
+        window.find_element('_vis_next_').Update(visible=False)
+        window.find_element('_vis_end_').Update(visible=False)
         is_hide_search_info = True
 
         # Init timer
@@ -1846,7 +1916,7 @@ class EasyChessGui:
                             logging.exception('Error in parsing FEN from clipboard.')
                             continue
 
-                        self.fen_to_psg_board(window)
+                        self.fen_to_psg_board(window, self.fen)
 
                         # If user is black and side to move is black
                         if not self.is_user_white and not board.turn:
@@ -1894,6 +1964,73 @@ class EasyChessGui:
                         k = 'b_elapse_k'
                     window.Element(k).Update(elapse_str)
                     human_timer.elapse += 100
+
+                    # --- Visualization Logic ---
+                    if button == '_visualize_consequence_cb_':
+                        if value['_visualize_consequence_cb_']: # Checkbox is ticked
+                            if self.last_consequence_variation:
+                                self.is_visualizing_consequence = True
+                                self.saved_game_fen_before_visualization = board.fen()
+                                self.visualization_index = -1 # Represents the state before the bad move
+                                self.visualization_board = board.copy()
+                                # Show and enable nav buttons
+                                window.find_element('_vis_start_').Update(visible=True)
+                                window.find_element('_vis_prev_').Update(visible=True)
+                                window.find_element('_vis_next_').Update(visible=True)
+                                window.find_element('_vis_end_').Update(visible=True)
+                        else: # Checkbox is unticked
+                            self.is_visualizing_consequence = False
+                            if self.saved_game_fen_before_visualization:
+                                board.set_fen(self.saved_game_fen_before_visualization)
+                                self.fen_to_psg_board(window, self.saved_game_fen_before_visualization)
+                                self.redraw_board(window)
+                            # Hide and disable nav buttons
+                            window.find_element('_vis_start_').Update(visible=False)
+                            window.find_element('_vis_prev_').Update(visible=False)
+                            window.find_element('_vis_next_').Update(visible=False)
+                            window.find_element('_vis_end_').Update(visible=False)
+                        continue
+
+                    if self.is_visualizing_consequence:
+                        new_index = self.visualization_index
+                        if button == '_vis_next_':
+                            new_index = min(self.visualization_index + 1, len(self.last_consequence_variation) - 1)
+                        elif button == '_vis_prev_':
+                            new_index = max(self.visualization_index - 1, -1)
+                        elif button == '_vis_start_':
+                            new_index = -1
+                        elif button == '_vis_end_':
+                            new_index = len(self.last_consequence_variation) - 1
+
+                        if new_index != self.visualization_index:
+                            self.visualization_index = new_index
+                            # Rebuild the board state for visualization
+                            temp_vis_board = self.visualization_board.copy()
+                            if self.visualization_index > -1:
+                                for i in range(self.visualization_index + 1):
+                                    temp_vis_board.push(self.last_consequence_variation[i])
+                            
+                            # Redraw the board to the visualized state
+                            self.fen_to_psg_board(window, temp_vis_board.fen())
+
+                            # Highlight the last move made in the visualization
+                            if self.visualization_index > -1:
+                                last_move = self.last_consequence_variation[self.visualization_index]
+                                fr_sq = last_move.from_square
+                                to_sq = last_move.to_square
+                                self.change_square_color(window, self.get_row(fr_sq), self.get_col(fr_sq))
+                                self.change_square_color(window, self.get_row(to_sq), self.get_col(to_sq))
+
+                        # Ignore other events while visualizing
+                        continue
+
+                    # Prevent making moves while visualizing
+                    if type(button) is tuple and self.is_visualizing_consequence:
+                        # Flash the board or give some feedback that moves are disabled
+                        sg.popup_animated(sg.DEFAULT_BASE64_ICON, 'Visualization mode is active.\nUncheck "Visualize" to continue.', time_between_frames=100, auto_close_duration=2, keep_on_top=True)
+                        continue
+
+                    # --- End Visualization Logic ---
 
                     if not is_human_stm:
                         break
@@ -2110,7 +2247,7 @@ class EasyChessGui:
                             logging.exception('Error in parsing FEN from clipboard.')
                             continue
 
-                        self.fen_to_psg_board(window)
+                        self.fen_to_psg_board(window, self.fen)
 
                         is_human_stm = True if board.turn else False
                         is_engine_ready = True if is_human_stm else False
@@ -2124,6 +2261,11 @@ class EasyChessGui:
 
                     # Mode: Play, stm: User, user starts moving
                     if type(button) is tuple:
+                        # Clear visualization if user makes a new move
+                        window.find_element('_visualize_consequence_cb_').Update(visible=False, value=False)
+                        window.find_element('_consequence_analysis_k').Update('')
+                        self.last_consequence_variation = []
+
                         # If fr_sq button is pressed
                         if move_state == 0:
                             move_from = button
@@ -2315,6 +2457,14 @@ class EasyChessGui:
                                                 
                                                 window.find_element('_consequence_analysis_k').Update('') # Clear first
                                                 window.find_element('_consequence_analysis_k').Update(consequence_text)
+                                                # Store variation and make visualization checkbox visible
+                                                self.last_consequence_variation = full_variation
+                                                window.find_element('_visualize_consequence_cb_').Update(visible=True)
+                                                # Hide nav buttons until checkbox is ticked
+                                                window.find_element('_vis_start_').Update(visible=False)
+                                                window.find_element('_vis_prev_').Update(visible=False)
+                                                window.find_element('_vis_next_').Update(visible=False)
+                                                window.find_element('_vis_end_').Update(visible=False)
 
                                         # Restore board color
                                         color = self.sq_dark_color if (fr_row + fr_col) % 2 else self.sq_light_color
@@ -2780,6 +2930,14 @@ class EasyChessGui:
             [sg.Multiline('', size=(55, 4), font=('Consolas', 10), key='_consequence_analysis_k',
                      disabled=True, autoscroll=False,
                      background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])],
+            # *** ÚJ MEZŐ: VIZUALIZÁCIÓS GOMBOK ***
+            [sg.Checkbox('Visualize', key='_visualize_consequence_cb_', enable_events=True, visible=False),
+             sg.Button('<<', key='_vis_start_', visible=False),
+             sg.Button('<', key='_vis_prev_', visible=False),
+             sg.Button('>', key='_vis_next_', visible=False),
+             sg.Button('>>', key='_vis_end_', visible=False)
+            ],
+
             # *************************************************
 
             [sg.Text('Move list', size=(16, 1), font=('Consolas', 10, ), visible = False)],
