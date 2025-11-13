@@ -81,7 +81,7 @@ ico_path = {
 
 
 MIN_DEPTH = 1
-MAX_DEPTH = 4
+MAX_DEPTH = 8
 MANAGED_UCI_OPTIONS = ['ponder', 'uci_chess960', 'multipv', 'uci_analysemode', 'ownbook']
 GUI_THEME = [
     'Green', 'GreenTan', 'LightGreen', 'BluePurple', 'Purple', 'BlueMono', 'GreenMono', 'BrownBlue',
@@ -2323,7 +2323,7 @@ class EasyChessGui:
                                 # board.pop() was here, but we need it before analysis
                                 
                                 # 1. Multi-PV elemzés a Top N lépéshez (ezt fogjuk használni a referenciaértékhez és a listához is)
-                                MAX_TOP_MOVES = 6
+                                MAX_TOP_MOVES = 20
                                 # MÓDOSÍTOTT HÍVÁS: run_engine_analysis
                                 top_moves_analysis = self.run_engine_analysis(board.fen(), self.max_depth, multipv=MAX_TOP_MOVES) 
 
@@ -2364,12 +2364,16 @@ class EasyChessGui:
                                     pv1_score = top_moves_analysis[0]['score']
                                     
                                     for i, info in enumerate(top_moves_analysis):
+                                        # CP Loss számítás: (Optimális Pontszám - Vizsgált Pontszám)
+                                        cp_loss_val = (pv1_score - info['score'])
+
+                                        # Ha a CP veszteség eléri a 30-at (0.3), ne mutassunk több lépést
+                                        if cp_loss_val >= 0.3 and i > 0: # Az első (legjobb) lépést mindig mutatjuk
+                                            break
+
                                         move_uci = info['best_move_uci']
                                         move_san = ref_board_for_san.san(chess.Move.from_uci(move_uci))
                                         score = info['score']
-                                        
-                                        # CP Loss számítás: (Optimális Pontszám - Vizsgált Pontszám)
-                                        cp_loss_val = (pv1_score - score)
                                         
                                         # Biztosítjuk, hogy a veszteség ne legyen negatív
                                         cp_loss_str = '{:.2f}'.format(max(0.00, cp_loss_val)) 
@@ -2421,7 +2425,7 @@ class EasyChessGui:
                                         
                                         # Run analysis on the board state AFTER the bad move
                                         # Use a deeper search for a more meaningful consequence analysis
-                                        consequence_depth = int(self.max_depth * 1.5)
+                                        consequence_depth = int(self.max_depth)
                                         consequence_analysis_list = self.run_engine_analysis(bad_move_board.fen(), consequence_depth, multipv=1)
                                         
                                         if consequence_analysis_list and isinstance(consequence_analysis_list, list):
