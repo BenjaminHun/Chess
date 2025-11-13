@@ -2408,10 +2408,12 @@ class EasyChessGui:
                                     window.find_element('_move_analysis_k').Update(analysis_text)
 
                                     # Check for bad move (CP loss > 50)
+                                    # Only check for blunders after 5 full moves (10 plies)
+                                    is_opening_phase = board.fullmove_number <= 5
                                     cp_loss = (ref_score_user_pov - user_score_user_pov)
-                                    if cp_loss > 0.3: # Threshold set to 50 CP (0.5)
+                                    if not is_opening_phase and cp_loss > 0.3: # Threshold set to 30 CP (0.3)
                                         is_bad_move = True
-                                        sg.Popup('Rossz lépés! A lépésed több mint 50CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
+                                        sg.Popup('Rossz lépés! A lépésed több mint 30CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
                                         
                                         # Analyze and show consequence of the bad move
                                         bad_move_board = board.copy()
