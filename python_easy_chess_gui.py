@@ -81,7 +81,7 @@ ico_path = {
 
 
 MIN_DEPTH = 1
-MAX_DEPTH = 8
+MAX_DEPTH = 4
 MANAGED_UCI_OPTIONS = ['ponder', 'uci_chess960', 'multipv', 'uci_analysemode', 'ownbook']
 GUI_THEME = [
     'Green', 'GreenTan', 'LightGreen', 'BluePurple', 'Purple', 'BlueMono', 'GreenMono', 'BrownBlue',
@@ -2336,12 +2336,16 @@ class EasyChessGui:
                                             user_analysis_at_ref = analysis
                                             break
                                 
-                                # Ha a felhasználó lépése nem volt a top N-ben, akkor futtatunk rá egy külön elemzést.
-                                # Ez biztosítja, hogy a nagyon rossz lépéseknek is legyen értéke.
-                                if user_analysis_at_ref is None:
-                                    user_analysis_at_ref = self.run_engine_analysis(
-                                        board.fen(), self.max_depth, move_to_evaluate=user_move_uci
-                                    )
+                                # Ha a felhasználó lépése nem volt a top N-ben, akkor nem futtatunk rá egy külön elemzést.
+                                # Ehelyett egy "ál" elemzési eredményt hozunk létre, ami nagy veszteséget mutat.
+                                if user_analysis_at_ref is None and top_moves_analysis and isinstance(top_moves_analysis, list):
+                                    # A legjobb lépés (PV1) pontszámát használjuk referenciaként.
+                                    pv1_score = top_moves_analysis[0]['score']
+                                    # Létrehozunk egy ál-eredményt, ami 0.30 CP-vel rosszabb, mint a legjobb.
+                                    user_analysis_at_ref = {
+                                        'best_move_uci': user_move_uci,
+                                        'score': pv1_score - 0.30
+                                    }
 
                                 # board.push(user_move) # Visszalépés a felhasználó lépéséhez
                                 # This is now done after the bad move check.
