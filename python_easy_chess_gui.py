@@ -1474,6 +1474,7 @@ class EasyChessGui:
         window.find_element('_consequence_analysis_k').Update('')
         window.find_element('eval_score_k').Update('')
         window.find_element('_top_moves_analysis_k').Update('') # *** ÚJ MEZŐ TÖRLÉSE ***
+        window.find_element('_fen_k').Update('')
         window.Element('w_base_time_k').Update('')
         # Hide and disable visualization controls on clear
         window.find_element('_visualize_consequence_cb_').Update(visible=False, value=False)
@@ -1858,6 +1859,7 @@ class EasyChessGui:
 
         # Game loop
         while not board.is_game_over(claim_draw=True):
+            window.find_element('_fen_k').Update(board.fen()) # FEN frissítése a ciklus elején
             moved_piece = None
 
             # Mode: Play, Hide book 1
@@ -1917,6 +1919,7 @@ class EasyChessGui:
                             continue
 
                         self.fen_to_psg_board(window, self.fen)
+                        window.find_element('_fen_k').Update(board.fen())
 
                         # If user is black and side to move is black
                         if not self.is_user_white and not board.turn:
@@ -2248,6 +2251,7 @@ class EasyChessGui:
                             continue
 
                         self.fen_to_psg_board(window, self.fen)
+                        window.find_element('_fen_k').Update(board.fen())
 
                         is_human_stm = True if board.turn else False
                         is_engine_ready = True if is_human_stm else False
@@ -2924,6 +2928,9 @@ class EasyChessGui:
                         # *** ÚJ MEZŐ A FOLYAMATOS ÁLLÁS MUTATÁSÁRA ***
             [sg.Text('Állás: +/-0.0', size=(55, 1), font=('Consolas', 10), 
                      key='eval_score_k', relief='sunken')],
+            # *** ÚJ MEZŐ A FEN KIJELZÉSÉRE ***
+            [sg.Text('FEN', size=(7, 1), font=('Consolas', 10)),
+             sg.Input('', size=(46, 1), key='_fen_k', readonly=True, background_color=sg.LOOK_AND_FEEL_TABLE[self.gui_theme]['BACKGROUND'])],
             # **********************************************
             # *** MÓDOSÍTOTT MEZŐ A LÉPÉS ÉRTÉKELÉSÉHEZ (sg.Multiline) ***
             [sg.Multiline('', size=(55, 2), font=('Consolas', 10), key='_move_analysis_k',
