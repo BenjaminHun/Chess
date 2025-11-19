@@ -719,6 +719,7 @@ class EasyChessGui:
 
         self.is_save_time_left = False
         self.is_save_user_comment = True
+        self.blunder_cp_threshold = 0.5
 
         # Visualization state for bad move consequence
         self.is_visualizing_consequence = False
@@ -2371,7 +2372,7 @@ class EasyChessGui:
                                 is_blunder = False
                                 is_opening_phase = board.fullmove_number <= 3
 
-                                if not is_opening_phase and cp_loss >= 0.5:
+                                if not is_opening_phase and cp_loss >= self.blunder_cp_threshold:
                                     is_blunder = True
                                     sg.Popup(f'Rossz lépés! A lépésed {cp_loss:.2f} CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
 
