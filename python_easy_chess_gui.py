@@ -2324,38 +2324,31 @@ class EasyChessGui:
                                 # Update rook location if this is a castle move
 
                                 # Visszalépés a referenciaálláshoz
-                                # board.pop() was here, but we need it before analysis
+                                # 1. Get evaluation BEFORE the move
+                                MAX_TOP_MOVES = 5
+                                pre_move_analysis_list = self.run_engine_analysis(board.fen(), self.max_depth, multipv=MAX_TOP_MOVES)
+                                pre_move_score = pre_move_analysis_list[0]['score'] if pre_move_analysis_list else 0
+
+                                # Display Top Moves analysis
+                                top_moves_text = ""
+                                if pre_move_analysis_list and isinstance(pre_move_analysis_list, list):
+                                    ref_board_for_san = pre_move_analysis_list[0]['board']
+                                    pv1_score = pre_move_analysis_list[0]['score']
+                                    
+                                    for i, info in enumerate(pre_move_analysis_list):
+                                        cp_loss_val = (pv1_score - info['score'])
+
+                                        move_uci = info['best_move_uci']
+                                        move_san = ref_board_for_san.san(chess.Move.from_uci(move_uci))
+                                        
+                                        cp_loss_str = '{:.2f}'.format(max(0.00, cp_loss_val)) 
+                                        
+                                        top_moves_text += f"Top {i+1}: {move_san} (CP Loss: {cp_loss_str})\n"
+                                        
+                                window.find_element('_top_moves_analysis_k').Update('') # Clear first
+                                window.find_element('_top_moves_analysis_k').Update(top_moves_text)
+
                                 
-                                # 1. Multi-PV elemzés a Top N lépéshez (ezt fogjuk használni a referenciaértékhez és a listához is)
-                                MAX_TOP_MOVES = 20
-                                # MÓDOSÍTOTT HÍVÁS: run_engine_analysis
-                                top_moves_analysis = self.run_engine_analysis(board.fen(), self.max_depth, multipv=MAX_TOP_MOVES) 
-
-                                # 2. A felhasználó lépésének megkeresése a top lépések között
-                                user_move_uci = user_move.uci()
-                                user_analysis_at_ref = None
-                                if top_moves_analysis and isinstance(top_moves_analysis, list):
-                                    for analysis in top_moves_analysis:
-                                        if analysis['best_move_uci'] == user_move_uci:
-                                            user_analysis_at_ref = analysis
-                                            break
-                                
-                                # Ha a felhasználó lépése nem volt a top N-ben, akkor nem futtatunk rá egy külön elemzést.
-                                # Ehelyett egy "ál" elemzési eredményt hozunk létre, ami nagy veszteséget mutat.
-                                if user_analysis_at_ref is None and top_moves_analysis and isinstance(top_moves_analysis, list):
-                                    # A legjobb lépés (PV1) pontszámát használjuk referenciaként.
-                                    pv1_score = top_moves_analysis[0]['score']
-                                    # Létrehozunk egy ál-eredményt, ami 0.30 CP-vel rosszabb, mint a legjobb.
-                                    user_analysis_at_ref = {
-                                        'best_move_uci': user_move_uci,
-                                        'score': pv1_score - 0.30
-                                    }
-
-                                # board.push(user_move) # Visszalépés a felhasználó lépéséhez
-                                # This is now done after the bad move check.
-
-                                is_bad_move = False
-
                                 if board.is_castling(user_move):
                                     self.update_rook(window, str(user_move))
 
@@ -2363,130 +2356,78 @@ class EasyChessGui:
                                 elif board.is_en_passant(user_move):
                                     self.update_ep(window, user_move, board.turn)
 
-                                # 4. Kijelzés: Top N Lépés és CP Loss (MINDIG, a rossz lépés ellenőrzés előtt)
-                                top_moves_text = ""
-                                if top_moves_analysis and isinstance(top_moves_analysis, list):
-                                    # A PV1 pontszámát használjuk CP Loss alapnak (az első elem)
-                                    # Ez a Legjobb Lépés értéke, ami a maximum
-                                    ref_board_for_san = top_moves_analysis[0]['board']
-                                    pv1_score = top_moves_analysis[0]['score']
+                                # 2. Make the move temporarily to get the new FEN
+                                board.push(user_move)
+                                post_move_fen = board.fen()
+                                board.pop() # Revert the move
+
+                                # 3. Get evaluation AFTER the move
+                                post_move_analysis_list = self.run_engine_analysis(post_move_fen, self.max_depth, multipv=1)
+                                # The score is from the opponent's perspective, so we negate it
+                                post_move_score = -post_move_analysis_list[0]['score'] if post_move_analysis_list else 0
+
+                                # 4. Calculate CP Loss and check for blunder
+                                cp_loss = pre_move_score - post_move_score
+                                is_blunder = False
+                                is_opening_phase = board.fullmove_number <= 3
+
+                                if not is_opening_phase and cp_loss >= 0.5:
+                                    is_blunder = True
+                                    sg.Popup(f'Rossz lépés! A lépésed {cp_loss:.2f} CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
+
+                                    # Analyze and show consequence of the bad move
+                                    bad_move_board = board.copy()
+                                    bad_move_board.push(user_move)
                                     
-                                    for i, info in enumerate(top_moves_analysis):
-                                        # CP Loss számítás: (Optimális Pontszám - Vizsgált Pontszám)
-                                        cp_loss_val = (pv1_score - info['score'])
+                                    # Run analysis on the board state AFTER the bad move
+                                    consequence_depth = int(self.max_depth)
+                                    # The analysis is already done for post_move_score, but we need the PV.
+                                    # We can reuse post_move_analysis_list if it contains the PV.
+                                    # The run_engine_analysis function was modified to include 'pv'.
+                                    if post_move_analysis_list and isinstance(post_move_analysis_list, list):
+                                        consequence_analysis = post_move_analysis_list[0]
+                                        pv_moves = consequence_analysis.get('pv') # This is a list of chess.Move objects
+                                        if pv_moves:
+                                            # Start with the board state BEFORE the bad move to include it in the output
+                                            temp_board = board.copy()
+                                            consequence_text = ""
 
-                                        # Ha a CP veszteség eléri a 30-at (0.3), ne mutassunk több lépést
-                                        if cp_loss_val >= 0.3 and i > 0: # Az első (legjobb) lépést mindig mutatjuk
-                                            break
+                                            # Prepend the user's bad move to the PV list
+                                            full_variation = [user_move] + pv_moves
 
-                                        move_uci = info['best_move_uci']
-                                        move_san = ref_board_for_san.san(chess.Move.from_uci(move_uci))
-                                        score = info['score']
-                                        
-                                        # Biztosítjuk, hogy a veszteség ne legyen negatív
-                                        cp_loss_str = '{:.2f}'.format(max(0.00, cp_loss_val)) 
-                                        
-                                        top_moves_text += f"Top {i+1}: {move_san} (CP Loss: {cp_loss_str})\n"
-                                        
-                                window.find_element('_top_moves_analysis_k').Update('') # Először töröljük
-                                window.find_element('_top_moves_analysis_k').Update(top_moves_text)
+                                            # Process in pairs to ensure complete lines
+                                            # Limit to 8 pairs (16 moves)
+                                            for i in range(0, min(len(full_variation), 16), 2):
+                                                if i + 1 >= len(full_variation):
+                                                    break
 
+                                                move1 = full_variation[i]
+                                                move2 = full_variation[i+1]
 
-                                # 3. Kijelzés: Saját és Legjobb Lépés Összehasonlítás
-                                analysis_text = ""
-                                if top_moves_analysis and user_analysis_at_ref and isinstance(top_moves_analysis, list):
-                                    
-                                    # A PV1 lesz a referencia (top_moves_analysis[0])
-                                    ref_analysis = top_moves_analysis[0]
-                                    ref_score_user_pov = ref_analysis['score']
-                                    user_score_user_pov = user_analysis_at_ref['score']
-                                    
-                                    ref_board = ref_analysis['board']
-                                    best_move_uci = ref_analysis['best_move_uci']
-                                    
-                                    best_move_san = ref_board.san(chess.Move.from_uci(best_move_uci))
-                                    user_move_san = ref_board.san(user_move)
-                                    
-                                    # Pontszámok formázása
-                                    user_score_str = '{:+.2f}'.format(user_score_user_pov)
-                                    best_score_str = '{:+.2f}'.format(ref_score_user_pov)
+                                                if temp_board.turn == chess.WHITE:
+                                                    consequence_text += f"{temp_board.fullmove_number}. "
+                                                elif i == 0: # First move is by Black
+                                                    consequence_text += f"{temp_board.fullmove_number}... "
 
-                                    # Összehasonlító szöveg
-                                    text_line_1 = f"Saját lépés: {user_move_san} {user_score_str}"
-                                    text_line_2 = f"Legjobb lépés: {best_move_san} {best_score_str}"
-                                    analysis_text = f"{text_line_1}\n{text_line_2}"
-                                    
-                                    window.find_element('_move_analysis_k').Update('') # Először töröljük
-                                    window.find_element('_move_analysis_k').Update(analysis_text)
+                                                consequence_text += f"{temp_board.san(move1)} "
+                                                temp_board.push(move1)
+                                                consequence_text += f"{temp_board.san(move2)}\n"
+                                                temp_board.push(move2)
+                                            
+                                            window.find_element('_consequence_analysis_k').Update('') # Clear first
+                                            window.find_element('_consequence_analysis_k').Update(consequence_text)
+                                            # Store variation and make visualization checkbox visible
+                                            self.last_consequence_variation = full_variation
+                                            window.find_element('_visualize_consequence_cb_').Update(visible=True)
 
-                                    # Check for bad move (CP loss > 50)
-                                    # Only check for blunders after 5 full moves (10 plies)
-                                    is_opening_phase = board.fullmove_number <= 3
-                                    cp_loss = (ref_score_user_pov - user_score_user_pov)
-                                    if not is_opening_phase and cp_loss >= 0.3: # Threshold set to 30 CP (0.3)
-                                        is_bad_move = True
-                                        sg.Popup('Rossz lépés! A lépésed több mint 30CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
-                                        
-                                        # Analyze and show consequence of the bad move
-                                        bad_move_board = board.copy()
-                                        bad_move_board.push(user_move)
-                                        
-                                        # Run analysis on the board state AFTER the bad move
-                                        # Use a deeper search for a more meaningful consequence analysis
-                                        consequence_depth = int(self.max_depth)
-                                        consequence_analysis_list = self.run_engine_analysis(bad_move_board.fen(), consequence_depth, multipv=1)
-                                        
-                                        if consequence_analysis_list and isinstance(consequence_analysis_list, list):
-                                            consequence_analysis = consequence_analysis_list[0]
-                                            # Get the PV from the engine after the bad move and display it
-                                            pv_moves = consequence_analysis.get('pv') # This is a list of chess.Move objects
-                                            if pv_moves:
-                                                # Start with the board state BEFORE the bad move to include it in the output
-                                                temp_board = board.copy()
-                                                consequence_text = ""
+                                    # Restore board color and wait for a new move
+                                    color = self.sq_dark_color if (fr_row + fr_col) % 2 else self.sq_light_color
+                                    window.find_element(key=(fr_row, fr_col)).Update(button_color=('white', color))
+                                    move_state = 0
+                                    continue # Go back to wait for user input
 
-                                                # Prepend the user's bad move to the PV list
-                                                full_variation = [user_move] + pv_moves
-
-                                                # Process in pairs to ensure complete lines
-                                                # Limit to 8 pairs (16 moves)
-                                                for i in range(0, min(len(full_variation), 16), 2):
-                                                    # Ensure there is a full pair to process
-                                                    if i + 1 >= len(full_variation):
-                                                        break
-
-                                                    move1 = full_variation[i]
-                                                    move2 = full_variation[i+1]
-
-                                                    # Add move number and ... for black if needed
-                                                    if temp_board.turn == chess.WHITE:
-                                                        consequence_text += f"{temp_board.fullmove_number}. "
-                                                    elif i == 0: # First move is by Black
-                                                        consequence_text += f"{temp_board.fullmove_number}... "
-
-                                                    consequence_text += f"{temp_board.san(move1)} "
-                                                    temp_board.push(move1)
-                                                    consequence_text += f"{temp_board.san(move2)}\n"
-                                                    temp_board.push(move2)
-                                                
-                                                window.find_element('_consequence_analysis_k').Update('') # Clear first
-                                                window.find_element('_consequence_analysis_k').Update(consequence_text)
-                                                # Store variation and make visualization checkbox visible
-                                                self.last_consequence_variation = full_variation
-                                                window.find_element('_visualize_consequence_cb_').Update(visible=True)
-                                                # Hide nav buttons until checkbox is ticked
-                                                window.find_element('_vis_start_').Update(visible=False)
-                                                window.find_element('_vis_prev_').Update(visible=False)
-                                                window.find_element('_vis_next_').Update(visible=False)
-                                                window.find_element('_vis_end_').Update(visible=False)
-
-                                        # Restore board color
-                                        color = self.sq_dark_color if (fr_row + fr_col) % 2 else self.sq_light_color
-                                        window.find_element(key=(fr_row, fr_col)).Update(button_color=('white', color))
-                                        
-                                        move_state = 0
-                                        continue # Go back to wait for user input
-                                if not is_bad_move:
+                                # 5. If not a blunder, proceed with the move
+                                if not is_blunder:
                                     # Empty the board from_square, applied to any types of move
                                     self.psg_board[move_from[0]][move_from[1]] = BLANK
 
