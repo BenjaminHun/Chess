@@ -719,7 +719,7 @@ class EasyChessGui:
 
         self.is_save_time_left = False
         self.is_save_user_comment = True
-        self.blunder_cp_threshold = 0.5
+        self.blunder_cp_threshold = 0.3
 
         # Visualization state for bad move consequence
         self.is_visualizing_consequence = False
@@ -2014,8 +2014,22 @@ class EasyChessGui:
                                 for i in range(self.visualization_index + 1):
                                     temp_vis_board.push(self.last_consequence_variation[i])
                             
+                            # Run analysis for the current visualized board state
+                            vis_analysis_result = self.run_engine_analysis(temp_vis_board.fen(), self.max_depth, multipv=1)
+                            if vis_analysis_result and isinstance(vis_analysis_result, list):
+                                # The score is from the current player's perspective.
+                                # We need to adjust it based on whose turn it is in the main game vs visualization.
+                                score = vis_analysis_result[0]['score']
+                                # If the turn in visualization is different from the main board's turn, negate the score.
+                                if temp_vis_board.turn == board.turn:
+                                    score = -score
+                                window.find_element('eval_score_k').Update(f"Állás: {score:+.2f}")
+
                             # Redraw the board to the visualized state
                             self.fen_to_psg_board(window, temp_vis_board.fen())
+                            
+                            # Update the FEN display
+                            window.find_element('_fen_k').Update(temp_vis_board.fen())
 
                             # Highlight the last move made in the visualization
                             if self.visualization_index > -1:
