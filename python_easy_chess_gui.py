@@ -2261,6 +2261,13 @@ class EasyChessGui:
                             self.get_fen()
                             self.set_new_game()
                             board = chess.Board(self.fen)
+                            fen_paste_analysis_result = self.run_engine_analysis(board.fen(), int(self.max_depth * 1.5), multipv=1)
+                            score = fen_paste_analysis_result[0]['score']
+                            if board.turn == (fen_paste_analysis_result[0]['board'].turn):
+                                score = -score
+                            # If the turn in visualization is different from the main board's turn, negate the score.
+
+                            window.find_element('eval_score_k').Update(f"Állás: {score:+.2f}")
                         except Exception:
                             logging.exception('Error in parsing FEN from clipboard.')
                             continue
@@ -2383,10 +2390,8 @@ class EasyChessGui:
 
                                 # 4. Calculate CP Loss and check for blunder
                                 cp_loss = pre_move_score - post_move_score
-                                is_blunder = False
-                                is_opening_phase = board.fullmove_number <= 3
 
-                                if not is_opening_phase and cp_loss >= self.blunder_cp_threshold:
+                                if cp_loss >= self.blunder_cp_threshold:
                                     is_blunder = True
                                     sg.Popup(f'Rossz lépés! A lépésed {cp_loss:.2f} CP veszteséggel jár.', title='Rossz lépés', icon=ico_path[platform]['pecg'])
 
@@ -2395,7 +2400,7 @@ class EasyChessGui:
                                     bad_move_board.push(user_move)
                                     
                                     # Run analysis on the board state AFTER the bad move
-                                    consequence_depth = int(self.max_depth)
+                                    consequence_depth = int(self.max_depth*1.5)
                                     # The analysis is already done for post_move_score, but we need the PV.
                                     # We can reuse post_move_analysis_list if it contains the PV.
                                     # The run_engine_analysis function was modified to include 'pv'.
@@ -2442,7 +2447,7 @@ class EasyChessGui:
                                     continue # Go back to wait for user input
 
                                 # 5. If not a blunder, proceed with the move
-                                if not is_blunder:
+                                else:
                                     # Empty the board from_square, applied to any types of move
                                     self.psg_board[move_from[0]][move_from[1]] = BLANK
 
